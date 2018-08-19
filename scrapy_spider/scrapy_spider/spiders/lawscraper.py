@@ -7,13 +7,16 @@ class LoginSpider(scrapy.Spider):
     
     #SET THIS to true to turn on nextpage and profile crawling
     PROCESS_PROFILES=True
-    PROCESS_NEXTPAGES=False
+    PROCESS_NEXTPAGES=True
     
-
+    #File content
+    filename = 'data.html' #% response.meta['item']
+    f = None
+    #with open(self.filename, 'wb') as f:  stream writting use this
     
     #A list of search criteria to use we will be looking at the alphabet
-    #list(string.ascii_lowercase)
-    alpha = ['a','b']
+    alpha = list(string.ascii_lowercase) #['a','b']
+    
     #Start command = scrapy crawl example.com
     start_urls = [  'https://www2.lsuc.on.ca/LawyerParalegalDirectory/loadSearchPage.do']
 
@@ -21,11 +24,15 @@ class LoginSpider(scrapy.Spider):
     #This is a standard scrapy format
     def parse(self, response):
       requests=[]
+      
+      self.f = open(self.filename, "w")
+      self.f.write("Started Parsing")
+      #self.log('Saved file %s' % self.filename)
       for char_a in self.alpha:
         for request in self.request_builder(char_a,response):
           yield request
           
-          
+    #builds search requests
     def request_builder(self, first, response):
         searchresults = [] # a storage variable for the search results
         request = [] # Holds the request as its built
@@ -38,7 +45,7 @@ class LoginSpider(scrapy.Spider):
         return
       
    
-    #Builds search request object
+    #Builds search request object payloads
     def search_request(self, response, criteria):
       #self.log('i is %s' % i)
       self.log('about to request %s' % criteria)
@@ -69,39 +76,36 @@ class LoginSpider(scrapy.Spider):
         yield subpage
         self.log('completed %s' % page)  
         return
-                    
+      
+    #Designed to read profile pages                
     def read_profile(self, response):
-        contact_data={}
+        contact_data="{'person': ["
+        comm=" "#used to introduce commas
+      
         for tabled in response.xpath('//*[@id="content"]/div/form/table/tr[4]/td/div/table/tr'):
-          self.log("NEXT CRITERIA")
-          value = tabled.xpath('td[2]/font//text()').extract_first()
-          key = tabled.xpath('td[1]/font//text()').extract_first()
-          #key = key.find('r')
-          row = { 'value' : value,
-                  'key' : key
-                }
+          value = tabled.xpath('td[2]//text()').extract_first()
+          key = tabled.xpath('td[1]//text()').extract_first()
           
-          #contact_data[tabled.select('/tr/td[1]/font').extract()] = tabled.select('/tr/td[2]/font').extract()
-          self.log('key %s value %s' % (key.strip(), value.strip() ))
-                   #xpath('td/font//text()')[1].extract())#.select('./tr/td/font').extract())
-          
+          #For some reason its set to None sometimes when no data is found vs an empty string
+          if key is None: 
+            key = ""
+          if value is None:
+            value = ""
+
+          if not key.strip() == '' or not value.strip() == '':
+            row = "\n\t{'key' : '%s', 'value' : '%s' }" % (key.strip(), value.strip().replace("\r\n"," ").replace("\t","").replace("\xa0","xa0"))
+            #self.log(row)
+            contact_data=contact_data+comm+row
+            comm=","
+        contact_data+="\n\t]\n},"
+        #writing to the file
+        self.f.write(contact_data)
                     
     #Processes page results on http requests
     def process_results(self,response):
         search_criteria=response.meta['item']
         self.log('Searching now = %s' % search_criteria)
-#        filename = 'data%s.html' % response.meta['item']
-#        with open(filename, 'wb') as f:
-#            f.write(response.body)
-#        self.log('Saved file %s' % filename)
 
-#TODO list
-#TOOD: Drill into people details from list
-#TODO: Ignore toDefinitionPage & toMADefinitionPage.do?startPoint
-#TODO: Handle "Search returned more than 500 records. Please narrow your search"
-#TODO: Handle "There are NO RECORDS returned for this search"
-#TODO: Capture files in appropriate location
-#TODO:parse profiles and write to files
         error_found=False
         over500=False
         #Handling errors presented on the page No record and too many
@@ -111,8 +115,7 @@ class LoginSpider(scrapy.Spider):
             self.log('ERROR: NO RECORDS for the search %s' % search_criteria)
           elif 'more than 500 records' in message:
             over500=True
-            self.log('ERROR: TOO MANY RECORDS (>500) for the search %s' % search_criteria)
-   
+            self.log('ERROR: TOO MANY RECORDS (>500) for the search %s' % search_criteria)   
         
         profile_pages=[]
         nextpage =""
@@ -132,39 +135,13 @@ class LoginSpider(scrapy.Spider):
                 yield profile
           self.log("Done")
 
+          #Drils through the next pages when there are multiple in the results
           for nxtpg in self.parse_nextpage(nextpage, search_criteria):
             if self.PROCESS_NEXTPAGES:
               yield nxtpg
-   
+        #Deals with error message stating results return too many results
         elif over500:
           for granular_request in self.request_builder(search_criteria, response):
             yield granular_request
-          
-        
         #self.log('Exiting save it')
         return
-
-    def people(self, response):
-
-        filename = 'data.html'
-        with open(filename, 'wb') as f:
-            f.write(response.body)
-        self.log('Saved file %s' % filename)
-        return
-        #return scrapy.FormRequest.from_response(
-        #    response,
-        #    formdata={'method':'POST', 'lastName': 'aa'},
-        #    callback=self.after_login
-        #        )
-
-    def after_login(self, response):
-        #for tr in response.css ('tr'):
-        #    yield {
-        #        'names': quote.css('td font.content a::text').extract(),
-        #    }
-        # check login succeed before going on
-        #if "authentication failed" in response.body:
-        #    self.logger.error("Login failed")
-            return
-
-        # continue scraping with authenticated session...
